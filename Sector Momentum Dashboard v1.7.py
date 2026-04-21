@@ -7,7 +7,7 @@ from streamlit_autorefresh import st_autorefresh
 import streamlit.components.v1 as components
 
 # 1. Dashboard Configuration
-st.set_page_config(page_title="Sector Momentum Terminal v1.9.0", layout="wide")
+st.set_page_config(page_title="Sector Terminal v2.0.0-Raw", layout="wide")
 refresh_count = st_autorefresh(interval=5 * 60 * 1000, key="data_update")
 
 # 2. Architect's Custom CSS
@@ -38,7 +38,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 
-# 3. Enhanced Momentum Engine
+# 3. Momentum Engine (Raw Price Logic)
 @st.cache_data(ttl=300)
 def fetch_live_momentum():
     tickers = ["XLE", "XLU", "XLB", "XLI", "XLP", "XLRE", "SPY", "XLC", "XLK", "XLV", "XLY", "XLF"]
@@ -46,7 +46,8 @@ def fetch_live_momentum():
              "XLRE": "Real Estate", "SPY": "S&P 500", "XLC": "Comm Svcs", "XLK": "Technology", "XLV": "Healthcare",
              "XLY": "Discretionary", "XLF": "Financials"}
 
-    raw_data = yf.download(tickers, period="6y", interval="1d", auto_adjust=True)
+    # CRITICAL FIX: auto_adjust=False to get Raw Prices (Price Return)
+    raw_data = yf.download(tickers, period="6y", interval="1d", auto_adjust=False, progress=False)
     price_data = raw_data['Close']
 
     momentum_list = []
@@ -55,41 +56,30 @@ def fetch_live_momentum():
         series = price_data[ticker].dropna()
         p_now = series.iloc[-1]
 
-        # Returns
+        # Returns based on Raw Close (Matches Schwab/Brokerage)
         r_5d = ((p_now / series.iloc[-6]) - 1) * 100
         r_1m = ((p_now / series.iloc[-21]) - 1) * 100
 
-        # --- Architect's Refined Logic (v1.9.0) ---
+        # Logic Tree
         if r_5d >= 0 and r_1m >= r_5d:
-            # Both 5d and prior period are positive
-            if r_5d > (0.333 * r_1m):
-                signal = "🚀 ACCELERATING"
-            else:
-                signal = "📈 STEADY UP"
-
+            signal = "🚀 ACCELERATING" if r_5d > (0.333 * r_1m) else "📈 STEADY UP"
         elif r_5d <= 0 and r_1m <= r_5d:
-            # Both 5d and prior period are negative
-            if abs(r_5d) > (0.333 * abs(r_1m)):
-                signal = "⚠️ PLUMMETING"
-            else:
-                signal = "📉 STEADY DOWN"
-
+            signal = "⚠️ PLUMMETING" if abs(r_5d) > (0.333 * abs(r_1m)) else "📉 STEADY DOWN"
         elif r_5d >= 0:
-            # Current week positive, but month logic above failed -> Prior was negative
             signal = "🔄 REVERSAL UP"
-
         else:
-            # Current week negative, but month logic above failed -> Prior was positive
             signal = "🔄 REVERSAL DOWN"
 
         momentum_list.append({
             "Ticker": ticker, "Sector": names[ticker], "Signal": signal,
-            "Price": float(p_now), "1D": float(((p_now / series.iloc[-2]) - 1) * 100),
-            "5D": float(r_5d), "1M": float(r_1m),
+            "Price": float(p_now),
+            "1D": float(((p_now / series.iloc[-2]) - 1) * 100),
+            "5D": float(r_5d),
+            "1M": float(r_1m),
             "6M": float(((p_now / series.iloc[-126]) - 1) * 100),
             "YTD": float(((p_now / series[series.index >= f'{datetime.now().year}-01-01'].iloc[0]) - 1) * 100),
             "1Y": float(((p_now / series.iloc[-252]) - 1) * 100),
-            "5Y": float(((p_now / series.iloc[0]) - 1) * 100)
+            "5Y": float(((p_now / series.iloc[-1260]) - 1) * 100) # Fix: Exactly 5 trading years
         })
     return pd.DataFrame(momentum_list)
 
@@ -102,34 +92,23 @@ def style_signal(val):
         "🔄 REVERSAL UP": "background-color: #00FFFF; color: black;",
         "🔄 REVERSAL DOWN": "background-color: #FFA500; color: black;",
         "📉 STEADY DOWN": "background-color: #C62828; color: white;",
-        "⚠️ PLUMMETING": "background-color: #FF0000; color: white;",
-        "Neutral": "background-color: #424242; color: white;"
+        "⚠️ PLUMMETING": "background-color: #FF0000; color: white;"
     }
     return f"{colors.get(val, '')} font-weight: bold; text-align: center; border: 1px solid #444;"
 
 
 def style_matrix(val):
     if not isinstance(val, (int, float)): return 'border: 1px solid #444;'
-    color = '#424242'
-    if val > 3:
-        color = '#1B5E20'
-    elif val > 0:
-        color = '#2E7D32'
-    elif val < -3:
-        color = '#8B0000'
-    elif val < 0:
-        color = '#C62828'
+    color = '#1B5E20' if val > 3 else '#2E7D32' if val > 0 else '#8B0000' if val < -3 else '#C62828' if val < 0 else '#424242'
     return f'background-color: {color}; color: white; font-weight: bold; text-align: center; border: 1px solid #444;'
 
 
 # --- UI Execution ---
 try:
     raw_df = fetch_live_momentum()
-    st.markdown('<h1>🛰️ LIVE SECTOR MOMENTUM</h1>', unsafe_allow_html=True)
-    st.markdown(f'<div class="version-tag">v1.9.0-Architect</div>', unsafe_allow_html=True)
-    st.markdown(
-        f'<div class="refresh-text">Last Refresh: {datetime.now().strftime("%H:%M:%S")} | Cycle Count: {refresh_count}</div>',
-        unsafe_allow_html=True)
+    st.markdown('<h1>🛰️ LIVE SECTOR MOMENTUM TERMINAL</h1>', unsafe_allow_html=True)
+    st.markdown(f'<div class="version-tag">v2.0.0-RawFix</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="refresh-text">Last Refresh: {datetime.now().strftime("%H:%M:%S")} | Cycle Count: {refresh_count}</div>', unsafe_allow_html=True)
 
     st.header("I. PERFORMANCE MATRIX")
     col_s1, col_s2 = st.columns([2, 1])
@@ -168,9 +147,7 @@ try:
 
     for i, (label, b_color, t_color, desc) in enumerate(legend_items):
         with l_cols[i]:
-            st.markdown(
-                f'<div class="legend-box" style="background-color: {b_color}; color: {t_color};">{label}<span class="legend-desc">{desc}</span></div>',
-                unsafe_allow_html=True)
+            st.markdown(f'<div class="legend-box" style="background-color: {b_color}; color: {t_color};">{label}<span class="legend-desc">{desc}</span></div>', unsafe_allow_html=True)
 
     # --- Chart Section ---
     st.header("II. MOMENTUM VISUALIZATION")
